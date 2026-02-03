@@ -72,6 +72,7 @@ def save_to_db(items: List[Dict], source: str) -> int:
                     "content": item.get('content', item['title']),
                     "url": item['url'],
                     "images": item.get('images', []), # listのまま渡す（supabase-pyが自動でJSONBに変換）
+                    "price": item.get('price'),
                     "category": classify_content(item['title']),
                     "published_at": item.get('published_at', datetime.now().isoformat())
                 }
@@ -173,11 +174,23 @@ def collect_chiikawa_market() -> List[Dict]:
                     elif not img_url.startswith('http'): img_url = f"https://chiikawamarket.jp{img_url}"
                     images.append(img_url.split('?')[0]) # クエリ削除
 
+            # 金額取得
+            price = None
+            price_elem = item.select_one('.price, .price-item')
+            if price_elem:
+                price_text = price_elem.get_text(strip=True)
+                # "¥", "円", "," を除去して数値に変換
+                try:
+                    price = int("".join(filter(str.isdigit, price_text)))
+                except ValueError:
+                    price = None
+
             results.append({
                 'source_id': source_id,
                 'title': title,
                 'url': product_url,
                 'images': images,
+                'price': price,
                 'published_at': datetime.now().isoformat()
             })
             if len(results) >= 20: break

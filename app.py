@@ -277,6 +277,10 @@ else:
                     }
                     st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
                 
+                # 価格表示
+                if item.get('price'):
+                    st.markdown(f"**💰 価格:** {item['price']:,}円")
+
                 # 本文（タイトルと異なる場合のみ）
                 if item.get('content') and item['content'] != item['title']:
                     content_text = item['content']

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS information (
   content TEXT,
   url TEXT NOT NULL,
   images JSONB,  -- 複数画像対応 ['url1', 'url2', ...]
+  price INTEGER, -- 商品の価格（円）
   category TEXT,  -- 'グッズ', 'イベント', '漫画', 'くじ', 'その他'
   published_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW()

@@ -58,7 +58,6 @@ git push -u origin main
 5. Advanced settingsで Secrets を設定：
 
 ```toml
-[default]
 supabase_url = "あなたのSupabase Project URL"
 supabase_key = "あなたのSupabase anon public key"
 ```

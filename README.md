@@ -174,10 +174,6 @@ information テーブル:
 - Streamlit Secretsが正しく設定されているか確認
 - requirements.txtのパッケージがすべてインストールされているか確認
 
-## 📝 ライセンス
-
-このプロジェクトはMITライセンスです。
-
 ## 🙏 クレジット
 
 - ちいかわ: ©nagano / chiikawa committee

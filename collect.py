@@ -9,6 +9,7 @@ import json
 import hashlib
 from datetime import datetime
 from typing import List, Dict, Optional
+import re
 
 # 必要なライブラリのインポート
 try:
@@ -179,9 +180,14 @@ def collect_chiikawa_market() -> List[Dict]:
             price_elem = item.select_one('.price, .price-item')
             if price_elem:
                 price_text = price_elem.get_text(strip=True)
-                # "¥", "円", "," を除去して数値に変換
                 try:
-                    price = int("".join(filter(str.isdigit, price_text)))
+                    # 数値部分（カンマを含む可能性あり）を正規表現で抽出
+                    match = re.search(r'(\d{1,3}(,\d{3})*|\d+)', price_text)
+                    if match:
+                        # カンマを除去して整数に変換
+                        price = int(match.group(1).replace(',', ''))
+                    else:
+                        price = None
                 except ValueError:
                     price = None
 
@@ -193,7 +199,7 @@ def collect_chiikawa_market() -> List[Dict]:
                 'price': price,
                 'published_at': datetime.now().isoformat()
             })
-            if len(results) >= 20: break
+            if len(results) >= 50: break
 
         print(f"  ✅ {len(results)}件解析完了")
         return results
@@ -261,11 +267,14 @@ def main():
         ("chiikawa_market", collect_chiikawa_market),
         ("chiikawa_info", collect_chiikawa_info)
     ]:
+        print(f"\n--- {source_name} 収集 ---")
         items = collector()
         if items:
             saved = save_to_db(items, source_name)
             print(f"  📊 {source_name}: {saved}件を新規保存")
             total_saved += saved
+        else:
+            print(f"  ⚠️ {source_name} からの新規情報はありませんでした。")
         time.sleep(1)
 
     print(f"\n✨ 完了！合計 {total_saved} 件の新規情報を保存しました")

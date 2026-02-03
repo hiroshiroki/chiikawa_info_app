@@ -61,6 +61,7 @@ try:
 except Exception as e:
     st.error("⚠️ データベース接続エラー")
     st.info("Streamlit Secretsに `supabase_url` と `supabase_key` を設定してください")
+    st.error(f"⚠️ 詳細エラー: {e}")
     st.stop()
 
 # ========================================

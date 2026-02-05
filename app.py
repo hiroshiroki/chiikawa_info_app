@@ -208,7 +208,7 @@ else:
     
     for idx, item in enumerate(info_list):
         with cols[idx % 3]:
-            st.container(border=True):
+            with st.container(border=True):
                 # 画像表示
                 if item.get('images'):
                     try:

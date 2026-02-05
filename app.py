@@ -138,49 +138,58 @@ with st.sidebar:
 # ========================================
 
 @st.cache_data(ttl=300)
-def get_information(category, sources, period, search, only_images, market_status):
-    """データベースから情報を取得"""
-    query = supabase.table("information").select("*")
+def fetch_data(category, sources, period, search, only_images, market_status):
+    """データベースから情報を取得し、件数とデータリストを返す"""
     
-    if category != "すべて":
-        query = query.eq("category", category)
-    
-    if sources:
-        query = query.in_("source", sources)
-    
-    if period != "すべて":
-        days_map = {"24時間以内": 1, "3日以内": 3, "1週間以内": 7, "1ヶ月以内": 30}
-        date_from = (datetime.now() - timedelta(days=days_map[period])).isoformat()
-        query = query.gte("published_at", date_from)
-    
-    if search:
-        query = query.or_(f"title.ilike.%{search}%,content.ilike.%{search}%")
-
-    if only_images:
-        # 画像が空でない、かつNULLでないものをフィルタリング
-        query = query.not_.is_("images", "null")
-        query = query.not_.eq("images", '[]')
-
-    if "chiikawa_market" in sources and market_status != "すべて":
-        status_value = "new" if market_status == "新商品" else "restock"
-        query = query.eq("status", status_value)
+    def build_query():
+        query = supabase.table("information").select("*", count='exact')
         
-    data = query.order("published_at", desc=True).limit(200).execute()
-    return data.data
+        if category != "すべて":
+            query = query.eq("category", category)
+        
+        if sources:
+            query = query.in_("source", sources)
+        
+        if period != "すべて":
+            days_map = {"24時間以内": 1, "3日以内": 3, "1週間以内": 7, "1ヶ月以内": 30}
+            date_from = (datetime.now() - timedelta(days=days_map[period])).isoformat()
+            query = query.gte("published_at", date_from)
+        
+        if search:
+            query = query.or_(f"title.ilike.%{search}%,content.ilike.%{search}%")
+
+        if only_images:
+            query = query.not_.is_("images", "null")
+            query = query.not_.eq("images", '[]')
+
+        if "chiikawa_market" in sources and market_status != "すべて":
+            status_value = "new" if market_status == "新商品" else "restock"
+            query = query.eq("status", status_value)
+            
+        return query
+
+    try:
+        query = build_query()
+        result = query.order("published_at", desc=True).limit(200).execute()
+        
+        # result.count にはフィルタリングされた総件数が入っている
+        total_count = result.count if result.count is not None else 0
+        
+        return total_count, result.data
+
+    except Exception as e:
+        st.error(f"データ取得エラー: {e}")
+        return 0, []
 
 # データ取得実行
-try:
-    info_list = get_information(
-        category,
-        selected_sources,
-        period,
-        search_text,
-        only_with_images,
-        market_status
-    )
-except Exception as e:
-    st.error(f"データ取得エラー: {e}")
-    info_list = []
+total_count, info_list = fetch_data(
+    category,
+    selected_sources,
+    period,
+    search_text,
+    only_with_images,
+    market_status
+)
 
 # ========================================
 # 統計表示
@@ -188,7 +197,7 @@ except Exception as e:
 
 st.subheader("📊 統計情報")
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("総件数", len(info_list))
+col1.metric("総件数", total_count)
 col2.metric("🐦 Twitter", len([i for i in info_list if i['source'] == 'twitter']))
 col3.metric("🎁 マーケット", len([i for i in info_list if i['source'] == 'chiikawa_market']))
 col4.metric("📰 インフォ", len([i for i in info_list if i['source'] == 'chiikawa_info']))
@@ -201,7 +210,7 @@ st.divider()
 if not info_list:
     st.info("📭 該当する情報がありません")
 else:
-    st.subheader(f"📰 最新情報 ({len(info_list)}件)")
+    st.subheader(f"📰 最新情報 ({len(info_list)}件 / 全{total_count}件)")
     
     # 3アイテムごとに新しい行を作成
     for i in range(0, len(info_list), 3):
@@ -238,27 +247,33 @@ else:
                     st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
 
                     # 日付表示 (ちいかわマーケットの場合はevent_dateを優先)
-                    display_date = None
+                    display_date = ""
+                    date_prefix = ""
+
                     if item['source'] == 'chiikawa_market' and item.get('event_date'):
                         try:
                             # 'YYYY-MM-DD' 形式を 'MM月DD日' に変換
                             date_obj = datetime.strptime(item['event_date'], '%Y-%m-%d')
                             display_date = date_obj.strftime('%m月%d日')
-                        except ValueError:
-                            pass # パース失敗時は何もしない
+                            if item['status'] == 'new':
+                                date_prefix = "発売"
+                            elif item['status'] == 'restock':
+                                date_prefix = "再入荷"
+                        except (ValueError, TypeError):
+                             display_date = "" # パース失敗時は空に
                     
                     if not display_date and item.get('published_at'):
                         # published_at がある場合、かつ event_date がないかパース失敗した場合
-                        # ISOフォーマットから変換
                         try:
                             published_dt = datetime.fromisoformat(item['published_at'].replace('Z', '+00:00'))
                             display_date = published_dt.strftime('%Y年%m月%d日 %H:%M')
-                        except ValueError:
-                            display_date = item['published_at'] # パース失敗時はそのまま表示
+                            date_prefix = "収集"
+                        except (ValueError, TypeError):
+                            display_date = str(item['published_at']) # パース失敗時はそのまま表示
                     
                     if display_date:
-                        st.caption(f"🗓️ {display_date}")
-                    
+                        st.caption(f"🗓️ {display_date} {date_prefix}")
+
                     # 価格表示
                     if item.get('price'):
                         st.caption(f"💰 {item['price']:,}円")

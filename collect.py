@@ -10,6 +10,7 @@ import hashlib
 from datetime import datetime
 from typing import List, Dict, Optional
 import re
+import pytz
 
 # 必要なライブラリのインポート
 try:
@@ -77,7 +78,7 @@ def save_to_db(items: List[Dict], source: str) -> int:
                     "images": item.get('images', []),
                     "price": item.get('price'),
                     "category": category,
-                    "published_at": item.get('published_at', datetime.now().isoformat()),
+                    "published_at": item.get('published_at', datetime.now(pytz.timezone('Asia/Tokyo')).isoformat()),
                     "status": item.get('status', 'new'),
                     "event_date": item.get('event_date') # ここで追加
                 }
@@ -98,11 +99,13 @@ def save_to_db(items: List[Dict], source: str) -> int:
 
 def collect_twitter() -> List[Dict]:
     print("\n🐦 Twitter収集開始...")
+    # 参照: https://github.com/zedeus/nitter/wiki/Instances
     nitter_instances = [
-        "https://nitter.mint.lgbt", 
-        "https://nitter.io", 
-        "https://nitter.namazso.eu",
-        "https://nitter.bus-hit.me"
+        "https://nitter.net",
+        "https://nitter.it",
+        "https://nitter.cz",
+        "https://nitter.poast.org",
+        "https://nitter.privacydev.net",
     ]
     account = "chiikawasan"
     
@@ -110,8 +113,8 @@ def collect_twitter() -> List[Dict]:
         try:
             rss_url = f"{instance}/{account}/rss"
             print(f"  試行: {rss_url}")
-            # User-Agentを設定してブロックを回避
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            # User-Agentを設定してブロックを回避, タイムアウトを設定
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
             feed_content = requests.get(rss_url, headers=headers, timeout=10).content
             feed = feedparser.parse(feed_content)
 
@@ -121,30 +124,26 @@ def collect_twitter() -> List[Dict]:
                     images = []
                     if hasattr(entry, 'summary'):
                         soup = BeautifulSoup(entry.summary, 'html.parser')
-                        # /pic/media%2F... のような形式の画像を抽出
-                        for a_tag in soup.find_all('a', href=lambda href: href and '/pic/media' in href):
-                            img_path = a_tag['href']
-                            # URLを再構築
-                            img_url = f"{instance}{img_path}"
-                            images.append(img_url)
-
-                        # 従来のimgタグも一応チェック
                         for img in soup.find_all('img'):
                             src = img.get('src')
                             if src:
                                 if src.startswith('//'): src = f"https:{src}"
-                                # ドメインがなければ付与
                                 if not src.startswith('http'):
                                      src = f"{instance}{src}"
-                                if src not in images: # 重複を避ける
+                                if src not in images:
                                     images.append(src)
                     
-                    # NitterのURLをTwitterのURLに変換
                     tweet_link = entry.link
                     if "nitter" in tweet_link:
                          tweet_link = tweet_link.replace(instance, "https://twitter.com")
 
                     tweet_id = tweet_link.split("/")[-1].split("#")[0]
+
+                    # published_atをJSTに変換して設定
+                    published_at_jst = datetime.now(pytz.timezone('Asia/Tokyo'))
+                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                        published_at_utc = datetime.fromtimestamp(time.mktime(entry.published_parsed))
+                        published_at_jst = pytz.utc.localize(published_at_utc).astimezone(pytz.timezone('Asia/Tokyo'))
                     
                     results.append({
                         'source_id': f"twitter_{tweet_id}",
@@ -152,7 +151,7 @@ def collect_twitter() -> List[Dict]:
                         'content': entry.get('summary', entry.title),
                         'url': tweet_link,
                         'images': images,
-                        'published_at': datetime.now().isoformat()
+                        'published_at': published_at_jst.isoformat(),
                     })
                 print(f"  ✅ {len(results)}件のツイートを解析")
                 return results
@@ -180,22 +179,16 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
         if date_header:
             match = re.search(r'(\d{1,2})月(\d{1,2})日', date_header.get_text())
             if match:
-                month = int(match.group(1))
-                day = int(match.group(2))
-                # 今年または来年の日付としてパースを試みる
-                now = datetime.now()
+                month, day = int(match.group(1)), int(match.group(2))
+                now = datetime.now(pytz.timezone('Asia/Tokyo'))
+                # 年のハンドリング: 抽出した月日が今日より未来の場合、年は去年と仮定
+                year = now.year
+                if now.month < month or (now.month == month and now.day < day):
+                    year -=1
                 try:
-                    # 今年の日付としてパース
-                    event_date_candidate = datetime(now.year, month, day)
-                    if event_date_candidate <= now: # 今日以前ならこの日付を採用
-                        event_date_str = event_date_candidate.strftime('%Y-%m-%d')
-                    else: # 未来の日付なら去年の日付を試す
-                        event_date_candidate = datetime(now.year - 1, month, day)
-                        if event_date_candidate <= now:
-                            event_date_str = event_date_candidate.strftime('%Y-%m-%d')
+                    event_date_str = datetime(year, month, day).strftime('%Y-%m-%d')
                 except ValueError:
-                    # 無効な日付（例: 2月30日）の場合はスキップ
-                    pass
+                    event_date_str = None # 2/30のような不正な日付はNoneに
                 
         items = soup.select('.product-item, .card')
         results = []
@@ -247,7 +240,7 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
                 'url': product_url,
                 'images': images,
                 'price': price,
-                'published_at': datetime.now().isoformat(),
+                'published_at': datetime.now(pytz.timezone('Asia/Tokyo')).isoformat(),
                 'status': status,
                 'event_date': event_date_str # ここで追加
             })
@@ -298,7 +291,7 @@ def collect_chiikawa_info() -> List[Dict]:
                 'title': title,
                 'url': info_url,
                 'images': images,
-                'published_at': datetime.now().isoformat()
+                'published_at': datetime.now(pytz.timezone('Asia/Tokyo')).isoformat()
             })
             if len(results) >= 20: break
         return results
@@ -310,7 +303,7 @@ def collect_chiikawa_info() -> List[Dict]:
 # ========================================
 
 def main():
-    print(f"🚀 実行開始: {datetime.now()}")
+    print(f"🚀 実行開始: {datetime.now(pytz.timezone('Asia/Tokyo'))}")
     total_saved = 0
     
     # Twitter

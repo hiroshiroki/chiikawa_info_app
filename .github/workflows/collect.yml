@@ -24,7 +24,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install feedparser supabase requests beautifulsoup4 lxml pytz
+        pip install snscrape supabase requests beautifulsoup4 lxml pytz
     
     - name: Run collector
       env:

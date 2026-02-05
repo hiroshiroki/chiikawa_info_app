@@ -16,7 +16,7 @@ import pytz
 try:
     import requests
     from bs4 import BeautifulSoup
-    import feedparser
+    import snscrape.modules.twitter as sntwitter
     from supabase import create_client, Client
 except ImportError as e:
     print(f"必要なライブラリがインストールされていません: {e}")
@@ -98,75 +98,93 @@ def save_to_db(items: List[Dict], source: str) -> int:
 # ========================================
 
 def collect_twitter() -> List[Dict]:
-    print("\n🐦 Twitter収集開始...")
-    # 参照: https://github.com/zedeus/nitter/wiki/Instances
-    nitter_instances = [
-        "https://nitter.net",
-        "https://nitter.it",
-        "https://nitter.cz",
-        "https://nitter.poast.org",
-        "https://nitter.privacydev.net",
-    ]
+    print("\n🐦 Twitter収集開始 (snscrape使用)...")
+    results = []
     account = "chiikawasan"
-    
-    for instance in nitter_instances:
-        try:
-            rss_url = f"{instance}/{account}/rss"
-            print(f"  試行: {rss_url}")
-            # User-Agentを設定してブロックを回避, タイムアウトを設定
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
-            feed_content = requests.get(rss_url, headers=headers, timeout=10).content
-            feed = feedparser.parse(feed_content)
+    max_tweets = 20 # 収集するツイートの最大数
 
-            if feed.entries:
-                results = []
-                for entry in feed.entries[:20]:
-                    images = []
-                    if hasattr(entry, 'summary'):
-                        soup = BeautifulSoup(entry.summary, 'html.parser')
-                        for img in soup.find_all('img'):
-                            src = img.get('src')
-                            if src:
-                                if src.startswith('//'): src = f"https:{src}"
-                                if not src.startswith('http'):
-                                     src = f"{instance}{src}"
-                                if src not in images:
-                                    images.append(src)
-                    
-                    tweet_link = entry.link
-                    if "nitter" in tweet_link:
-                         tweet_link = tweet_link.replace(instance, "https://twitter.com")
+    try:
+        # snscrapeを使ってユーザーのタイムラインからツイートを取得
+        scraper = sntwitter.TwitterUserScraper(account)
+        
+        for i, tweet in enumerate(scraper.get_items()):
+            if i >= max_tweets:
+                break
 
-                    tweet_id = tweet_link.split("/")[-1].split("#")[0]
+            images = []
+            if tweet.media:
+                for medium in tweet.media:
+                    if isinstance(medium, sntwitter.Photo):
+                        # 'orig' or 'large' サイズのURLを取得
+                        images.append(medium.fullUrl.replace('name=large', 'name=orig'))
+                    elif isinstance(medium, sntwitter.Video):
+                        # ビデオのサムネイルURLを取得
+                        images.append(medium.thumbnailUrl)
 
-                    # published_atをJSTに変換して設定
-                    published_at_jst = datetime.now(pytz.timezone('Asia/Tokyo'))
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        published_at_utc = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        published_at_jst = pytz.utc.localize(published_at_utc).astimezone(pytz.timezone('Asia/Tokyo'))
-                    
-                    results.append({
-                        'source_id': f"twitter_{tweet_id}",
-                        'title': entry.title[:100],
-                        'content': entry.get('summary', entry.title),
-                        'url': tweet_link,
-                        'images': images,
-                        'published_at': published_at_jst.isoformat(),
-                    })
-                print(f"  ✅ {len(results)}件のツイートを解析")
-                return results
-        except Exception as e:
-            print(f"  ❌ インスタンスエラー ({instance}): {e}")
-            continue
-    print("  ⚠️ 全てのNitterインスタンスで収集に失敗しました。")
-    return []
+            # 本文が長すぎる場合は切り詰める
+            title = tweet.rawContent
+            if len(title) > 100:
+                title = title[:97] + "..."
+
+            results.append({
+                'source_id': f"twitter_{tweet.id}",
+                'title': title,
+                'content': tweet.rawContent,
+                'url': tweet.url,
+                'images': images,
+                'published_at': tweet.date.astimezone(pytz.timezone('Asia/Tokyo')).isoformat(),
+            })
+        
+        print(f"  ✅ {len(results)}件のツイートを解析")
+        return results
+
+    except Exception as e:
+        print(f"  ❌ snscrapeでの収集エラー: {e}")
+        # snscrapeが失敗した場合、収集を中止
+        return []
 
 # ========================================
 # 2. ちいかわマーケット収集（強化版）
 # ========================================
 
+def get_latest_market_urls() -> Dict[str, Optional[str]]:
+    """ちいかわマーケットの最新の新商品・再入荷ページのURLを取得"""
+    print("  🔗 最新のマーケットURLを取得中...")
+    base_url = "https://chiikawamarket.jp"
+    urls = {"new": None, "restock": None}
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(base_url, headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # ナビゲーションメニューからリンクを探す
+        nav_links = soup.select('a.nav-link, .header__menu-item')
+        for link in nav_links:
+            text = link.get_text(strip=True)
+            href = link.get('href')
+            if not href: continue
+
+            if "新商品" in text or "NEW" in text:
+                urls["new"] = f"{base_url}{href}" if not href.startswith('http') else href
+            elif "再入荷" in text or "RESTOCK" in text:
+                urls["restock"] = f"{base_url}{href}" if not href.startswith('http') else href
+        
+        print(f"  👍 取得成功: NEW -> {urls['new']}, RESTOCK -> {urls['restock']}")
+        return urls
+    except Exception as e:
+        print(f"  ❌ 最新マーケットURLの取得に失敗: {e}")
+        # フォールバックとして以前のURLを返す
+        return {
+            "new": "https://chiikawamarket.jp/collections/newitems",
+            "restock": "https://chiikawamarket.jp/collections/restock"
+        }
+
 def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
-    print(f"\n🎁 ちいかわマーケット ({status}) 収集開始...")
+    if not url:
+        print(f"\n🎁 ちいかわマーケット ({status}) のURLがありません。スキップします。")
+        return []
+    print(f"\n🎁 ちいかわマーケット ({status}) 収集開始: {url}")
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=15)
@@ -175,27 +193,26 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
         
         # ページタイトルから日付を抽出 (例: "1月30日発売商品"、"1月23日再入荷商品")
         event_date_str = None
-        date_header = soup.select_one('h1.page-title, h2.section-header__title')
+        date_header = soup.select_one('h1.page-title, .collection__title')
         if date_header:
             match = re.search(r'(\d{1,2})月(\d{1,2})日', date_header.get_text())
             if match:
                 month, day = int(match.group(1)), int(match.group(2))
                 now = datetime.now(pytz.timezone('Asia/Tokyo'))
-                # 年のハンドリング: 抽出した月日が今日より未来の場合、年は去年と仮定
-                year = now.year
-                if now.month < month or (now.month == month and now.day < day):
-                    year -=1
+                # 年のハンドリング: 抽出した月が未来の月なら去年、そうでなければ今年
+                year = now.year - 1 if now.month < month else now.year
                 try:
                     event_date_str = datetime(year, month, day).strftime('%Y-%m-%d')
+                    print(f"  📅 イベント日を抽出: {event_date_str}")
                 except ValueError:
                     event_date_str = None # 2/30のような不正な日付はNoneに
                 
-        items = soup.select('.product-item, .card')
+        items = soup.select('.product-item, .card-wrapper')
         results = []
         seen_ids = set()
 
         for item in items:
-            title_elem = item.select_one('.product-item__title, .card__title, h3')
+            title_elem = item.select_one('.product-item__title, .card__heading, h3.card-information__text')
             if not title_elem: continue
             title = title_elem.get_text(strip=True)
             
@@ -210,28 +227,33 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
             seen_ids.add(source_id)
 
             images = []
-            img_tag = item.select_one('img')
+            img_tag = item.select_one('img.media')
             if img_tag:
-                img_url = img_tag.get('data-src') or img_tag.get('src') or img_tag.get('data-lazy-src')
+                # data-src, src, srcset の順で試す
+                img_url = img_tag.get('src') or img_tag.get('data-src')
                 if not img_url and img_tag.get('srcset'):
-                    img_url = img_tag.get('srcset').split(',')[0].split(' ')[0]
+                    # srcsetから最初のURLを取得
+                    img_url = re.split(r'\s*,\s*', img_tag.get('srcset'))[0].split(' ')[0]
                 
                 if img_url:
                     if img_url.startswith('//'): img_url = f"https:{img_url}"
-                    elif not img_url.startswith('http'): img_url = f"https://chiikawamarket.jp{img_url}"
+                    # ドメイン相対パスの場合、完全なURLに変換
+                    elif not img_url.startswith('http'):
+                        img_url = f"https:{img_url}" if img_url.startswith('//') else f"https://chiikawamarket.jp{img_url}"
+
                     images.append(img_url.split('?')[0])
+
 
             price = None
             price_elem = item.select_one('.price, .price-item')
             if price_elem:
                 price_text = price_elem.get_text(strip=True)
                 try:
-                    match = re.search(r'(\d{1,3}(,\d{3})*|\d+)', price_text)
+                    # "¥1,100" や "1100" のような形式から数字のみを抽出
+                    match = re.search(r'(\d[\d,.]*)', price_text)
                     if match:
-                        price = int(match.group(1).replace(',', ''))
-                    else:
-                        price = None
-                except ValueError:
+                        price = int(float(match.group(1).replace(',', '')))
+                except (ValueError, IndexError):
                     price = None
 
             results.append({
@@ -264,11 +286,11 @@ def collect_chiikawa_info() -> List[Dict]:
         response = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        items = soup.select('.news-item, article, li')
+        items = soup.select('article.post-item')
         results = []
         for item in items:
-            title_elem = item.select_one('h2, h3, .title')
-            link_elem = item.select_one('a')
+            title_elem = item.select_one('h2.post-title')
+            link_elem = item.select_one('a.post-link')
             if not title_elem or not link_elem: continue
             
             title = title_elem.get_text(strip=True)
@@ -278,7 +300,7 @@ def collect_chiikawa_info() -> List[Dict]:
                 info_url = f"https://chiikawa-info.jp{info_url}"
 
             images = []
-            img_tag = item.select_one('img')
+            img_tag = item.select_one('img.post-thumb-img')
             if img_tag:
                 src = img_tag.get('src')
                 if src:
@@ -286,16 +308,28 @@ def collect_chiikawa_info() -> List[Dict]:
                     elif not src.startswith('http'): src = f"https://chiikawa-info.jp{src}"
                     images.append(src)
 
+            # published_at を記事の日付から取得
+            date_elem = item.select_one('time.post-date')
+            published_at = datetime.now(pytz.timezone('Asia/Tokyo')).isoformat()
+            if date_elem and date_elem.get('datetime'):
+                try:
+                    published_at = datetime.fromisoformat(date_elem.get('datetime')).astimezone(pytz.timezone('Asia/Tokyo')).isoformat()
+                except ValueError:
+                    pass # パース失敗時は現在時刻のまま
+
             results.append({
                 'source_id': generate_source_id(info_url),
                 'title': title,
                 'url': info_url,
                 'images': images,
-                'published_at': datetime.now(pytz.timezone('Asia/Tokyo')).isoformat()
+                'published_at': published_at,
             })
             if len(results) >= 20: break
+        
+        print(f"  ✅ {len(results)}件解析完了")
         return results
     except Exception as e:
+        print(f"  ❌ エラー: {e}")
         return []
 
 # ========================================
@@ -317,27 +351,32 @@ def main():
         print(f"  ⚠️ twitter からの新規情報はありませんでした。")
     time.sleep(1)
 
+    # ちいかわマーケットのURLを動的に取得
+    market_urls = get_latest_market_urls()
+
     # ちいかわマーケット（新商品）
-    print("\n--- chiikawa_market (new) 収集 ---")
-    market_new_items = collect_chiikawa_market("https://chiikawamarket.jp/collections/newitems", "new")
-    if market_new_items:
-        saved = save_to_db(market_new_items, "chiikawa_market")
-        print(f"  📊 chiikawa_market (new): {saved}件を新規保存")
-        total_saved += saved
-    else:
-        print(f"  ⚠️ chiikawa_market (new) からの新規情報はありませんでした。")
-    time.sleep(1)
+    if market_urls.get("new"):
+        print("\n--- chiikawa_market (new) 収集 ---")
+        market_new_items = collect_chiikawa_market(market_urls["new"], "new")
+        if market_new_items:
+            saved = save_to_db(market_new_items, "chiikawa_market")
+            print(f"  📊 chiikawa_market (new): {saved}件を新規保存")
+            total_saved += saved
+        else:
+            print(f"  ⚠️ chiikawa_market (new) からの新規情報はありませんでした。")
+        time.sleep(1)
 
     # ちいかわマーケット（再入荷）
-    print("\n--- chiikawa_market (restock) 収集 ---")
-    market_restock_items = collect_chiikawa_market("https://chiikawamarket.jp/collections/restock", "restock")
-    if market_restock_items:
-        saved = save_to_db(market_restock_items, "chiikawa_market")
-        print(f"  📊 chiikawa_market (restock): {saved}件を新規保存")
-        total_saved += saved
-    else:
-        print(f"  ⚠️ chiikawa_market (restock) からの新規情報はありませんでした。")
-    time.sleep(1)
+    if market_urls.get("restock"):
+        print("\n--- chiikawa_market (restock) 収集 ---")
+        market_restock_items = collect_chiikawa_market(market_urls["restock"], "restock")
+        if market_restock_items:
+            saved = save_to_db(market_restock_items, "chiikawa_market")
+            print(f"  📊 chiikawa_market (restock): {saved}件を新規保存")
+            total_saved += saved
+        else:
+            print(f"  ⚠️ chiikawa_market (restock) からの新規情報はありませんでした。")
+        time.sleep(1)
 
     # ちいかわインフォ
     print("\n--- chiikawa_info 収集 ---")

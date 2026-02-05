@@ -42,6 +42,10 @@ st.markdown("""
         border-color: #FF9800;
         color: #FF9800;
     }
+    .uniform-item-container {
+        min-height: 300px; /* Adjust as needed */
+        overflow-y: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +212,7 @@ else:
     
     for idx, item in enumerate(info_list):
         with cols[idx % 3]:
-            with st.container(border=True):
+            with st.container(border=True, height=300):
                 # 画像表示
                 if item.get('images'):
                     try:

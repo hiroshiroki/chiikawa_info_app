@@ -237,6 +237,28 @@ else:
                     source_names = {"twitter": "🐦 Twitter", "chiikawa_market": "🎁 ちいかわマーケット", "chiikawa_info": "📰 ちいかわインフォ"}
                     st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
 
+                    # 日付表示 (ちいかわマーケットの場合はevent_dateを優先)
+                    display_date = None
+                    if item['source'] == 'chiikawa_market' and item.get('event_date'):
+                        try:
+                            # 'YYYY-MM-DD' 形式を 'MM月DD日' に変換
+                            date_obj = datetime.strptime(item['event_date'], '%Y-%m-%d')
+                            display_date = date_obj.strftime('%m月%d日')
+                        except ValueError:
+                            pass # パース失敗時は何もしない
+                    
+                    if not display_date and item.get('published_at'):
+                        # published_at がある場合、かつ event_date がないかパース失敗した場合
+                        # ISOフォーマットから変換
+                        try:
+                            published_dt = datetime.fromisoformat(item['published_at'].replace('Z', '+00:00'))
+                            display_date = published_dt.strftime('%Y年%m月%d日 %H:%M')
+                        except ValueError:
+                            display_date = item['published_at'] # パース失敗時はそのまま表示
+                    
+                    if display_date:
+                        st.caption(f"🗓️ {display_date}")
+                    
                     # 価格表示
                     if item.get('price'):
                         st.caption(f"💰 {item['price']:,}円")

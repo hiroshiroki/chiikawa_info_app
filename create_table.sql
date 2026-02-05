@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS information (
   status TEXT DEFAULT 'new', -- 'new' or 'restock'
   category TEXT,  -- 'グッズ', 'イベント', '漫画', 'くじ', 'その他'
   published_at TIMESTAMP,
+  event_date TEXT, -- ちいかわマーケットの発売日/再入荷日
   created_at TIMESTAMP DEFAULT NOW()
 );
 

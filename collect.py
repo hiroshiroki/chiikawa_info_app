@@ -78,7 +78,8 @@ def save_to_db(items: List[Dict], source: str) -> int:
                     "price": item.get('price'),
                     "category": category,
                     "published_at": item.get('published_at', datetime.now().isoformat()),
-                    "status": item.get('status', 'new') 
+                    "status": item.get('status', 'new'),
+                    "event_date": item.get('event_date') # ここで追加
                 }
                 
                 supabase.table("information").insert(data).execute()
@@ -98,11 +99,10 @@ def save_to_db(items: List[Dict], source: str) -> int:
 def collect_twitter() -> List[Dict]:
     print("\n🐦 Twitter収集開始...")
     nitter_instances = [
-        "https://nitter.net", 
-        "https://nitter.it", 
-        "https://nitter.cz",
-        "https://nitter.poast.org", 
-        "https://nitter.privacydev.net"
+        "https://nitter.mint.lgbt", 
+        "https://nitter.io", 
+        "https://nitter.namazso.eu",
+        "https://nitter.bus-hit.me"
     ]
     account = "chiikawasan"
     
@@ -174,6 +174,29 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
+        # ページタイトルから日付を抽出 (例: "1月30日発売商品"、"1月23日再入荷商品")
+        event_date_str = None
+        date_header = soup.select_one('h1.page-title, h2.section-header__title')
+        if date_header:
+            match = re.search(r'(\d{1,2})月(\d{1,2})日', date_header.get_text())
+            if match:
+                month = int(match.group(1))
+                day = int(match.group(2))
+                # 今年または来年の日付としてパースを試みる
+                now = datetime.now()
+                try:
+                    # 今年の日付としてパース
+                    event_date_candidate = datetime(now.year, month, day)
+                    if event_date_candidate <= now: # 今日以前ならこの日付を採用
+                        event_date_str = event_date_candidate.strftime('%Y-%m-%d')
+                    else: # 未来の日付なら去年の日付を試す
+                        event_date_candidate = datetime(now.year - 1, month, day)
+                        if event_date_candidate <= now:
+                            event_date_str = event_date_candidate.strftime('%Y-%m-%d')
+                except ValueError:
+                    # 無効な日付（例: 2月30日）の場合はスキップ
+                    pass
+                
         items = soup.select('.product-item, .card')
         results = []
         seen_ids = set()
@@ -225,7 +248,8 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
                 'images': images,
                 'price': price,
                 'published_at': datetime.now().isoformat(),
-                'status': status
+                'status': status,
+                'event_date': event_date_str # ここで追加
             })
             if len(results) >= 50: break
 

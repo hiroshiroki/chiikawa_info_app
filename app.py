@@ -96,6 +96,14 @@ with st.sidebar:
         format_func=lambda x: source_options[x],
         help="表示する情報源を選択"
     )
+
+    market_status = "すべて"
+    if "chiikawa_market" in selected_sources:
+        market_status = st.selectbox(
+            "ちいかわマーケット商品区分",
+            ["すべて", "新商品", "再入荷"],
+            help="ちいかわマーケットの商品区分で絞り込み"
+        )
     
     # 期間
     period = st.selectbox(
@@ -130,7 +138,7 @@ with st.sidebar:
 # ========================================
 
 @st.cache_data(ttl=300)
-def get_information(category, sources, period, search, only_images):
+def get_information(category, sources, period, search, only_images, market_status):
     """データベースから情報を取得"""
     query = supabase.table("information").select("*")
     
@@ -153,6 +161,10 @@ def get_information(category, sources, period, search, only_images):
         query = query.not_.is_("images", "null")
         query = query.not_.eq("images", '[]')
 
+    if "chiikawa_market" in sources and market_status != "すべて":
+        status_value = "new" if market_status == "新商品" else "restock"
+        query = query.eq("status", status_value)
+        
     data = query.order("published_at", desc=True).limit(200).execute()
     return data.data
 
@@ -163,7 +175,8 @@ try:
         selected_sources,
         period,
         search_text,
-        only_with_images
+        only_with_images,
+        market_status
     )
 except Exception as e:
     st.error(f"データ取得エラー: {e}")

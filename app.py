@@ -203,17 +203,23 @@ if not info_list:
 else:
     st.subheader(f"📰 最新情報 ({len(info_list)}件)")
     
+    # 3列で表示
+    cols = st.columns(3)
+    
     for idx, item in enumerate(info_list):
-        with st.container():
-            col_icon, col_content = st.columns([1, 20])
-            
-            with col_icon:
-                source_icons = {"twitter": "🐦", "chiikawa_market": "🎁", "chiikawa_info": "📰"}
-                st.markdown(f"### {source_icons.get(item['source'], '📌')}")
-            
-            with col_content:
+        with cols[idx % 3]:
+            st.container(border=True):
+                # 画像表示
+                if item.get('images'):
+                    try:
+                        images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
+                        if images:
+                            st.image(images[0], width=150) # 最初の画像のみを固定幅で表示
+                    except:
+                        pass
+                
                 # タイトルとステータスバッジ
-                title_html = f"### {item['title']}"
+                title_html = f"**{item['title']}**"
                 if item['source'] == 'chiikawa_market' and item.get('status'):
                     status_text = "新商品" if item['status'] == 'new' else "再入荷"
                     status_class = "status-new" if item['status'] == 'new' else "status-restock"
@@ -221,47 +227,23 @@ else:
                 st.markdown(title_html, unsafe_allow_html=True)
                 
                 # メタ情報
-                meta_col1, meta_col2, meta_col3 = st.columns([2, 1, 2])
-                try:
-                    pub_date = item['published_at']
-                    date_str = pub_date.split('T')[0] if isinstance(pub_date, str) else str(pub_date).split(' ')[0]
-                    meta_col1.caption(f"📅 {date_str} 追加")
-                except:
-                    meta_col1.caption("📅 日付不明")
+                # pub_date = item['published_at']
+                # date_str = pub_date.split('T')[0] if isinstance(pub_date, str) else str(pub_date).split(' ')[0]
+                # st.caption(f"📅 {date_str}")
                 
                 category_emoji = {"グッズ": "🎁", "くじ": "🎲", "イベント": "🎪", "食玩": "🍬", "プライズ": "🏆", "アニメ": "📺", "その他": "📌"}
                 emoji = category_emoji.get(item['category'], "📌")
-                meta_col2.caption(f"{emoji} {item['category']}")
+                st.caption(f"{emoji} {item['category']}")
                 
                 source_names = {"twitter": "🐦 Twitter", "chiikawa_market": "🎁 ちいかわマーケット", "chiikawa_info": "📰 ちいかわインフォ"}
-                meta_col3.caption(f"📍 {source_names.get(item['source'], item['source'])}")
+                st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
 
+                # 価格表示
                 if item.get('price'):
-                    st.markdown(f"**💰 価格:** {item['price']:,}円")
+                    st.caption(f"💰 {item['price']:,}円")
+                
+                st.link_button("🔗 詳細を見る", item['url'], use_container_width=True)
 
-                if item.get('content') and item['content'] != item['title']:
-                    from bs4 import BeautifulSoup
-                    content_text = BeautifulSoup(item['content'], 'html.parser').get_text(strip=True)
-                    if len(content_text) > 200:
-                        content_text = content_text[:200] + "..."
-                    if content_text:
-                        st.write(content_text)
-                
-                if item.get('images'):
-                    try:
-                        images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
-                        if images:
-                            st.caption(f"📸 画像 ({len(images)}枚)")
-                            cols = st.columns(min(len(images), 3))
-                            for i, img_url in enumerate(images[:3]):
-                                cols[i].image(img_url, use_container_width=True)
-                    except:
-                        pass
-                
-                st.link_button("🔗 元記事を見る", item['url'])
-            
-            if idx < len(info_list) - 1:
-                st.divider()
 
 st.divider()
 st.caption("💡 情報は自動収集されます。最新情報は各公式サイトをご確認ください。")

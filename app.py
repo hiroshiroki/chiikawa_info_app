@@ -217,7 +217,7 @@ else:
                         try:
                             images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
                             if images:
-                                st.image(images[0], use_container_width=True) # コンテナ幅に合わせる
+                                st.image(images[0], width=100) # 固定幅で表示
                         except:
                             pass
                     

@@ -76,7 +76,7 @@ GitHub Actionsを手動実行：
 ```
 chiikawa-info-app/
 ├── app.py                    # Streamlitアプリ本体
-├── collect_all.py            # データ収集スクリプト
+├── collect.py            # データ収集スクリプト
 ├── requirements.txt          # 必要なPythonパッケージ
 ├── create_table.sql          # データベーステーブル定義
 ├── .github/
@@ -98,7 +98,7 @@ export SUPABASE_URL="your_url"
 export SUPABASE_KEY="your_key"
 
 # データ収集テスト
-python collect_all.py
+python collect.py
 
 # アプリ起動
 streamlit run app.py
@@ -129,7 +129,7 @@ supabase_key = "your_key"
 
 ### カテゴリ判定の調整
 
-`collect_all.py`の`classify_content`関数を編集：
+`collect.py`の`classify_content`関数を編集：
 
 ```python
 def classify_content(text: str) -> str:
@@ -162,7 +162,7 @@ information テーブル:
 
 1. GitHub Actionsのログを確認
 2. Supabaseの接続情報が正しいか確認
-3. Nitterインスタンスが落ちている可能性（collect_all.py参照）
+3. Nitterインスタンスが落ちている可能性（collect.py参照）
 
 ### 画像が表示されない
 

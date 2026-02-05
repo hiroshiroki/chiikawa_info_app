@@ -25,25 +25,22 @@ st.markdown("""
         text-align: center;
         padding: 1rem 0;
     }
-    .source-badge {
+    .status-badge {
         display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.85rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 10px;
+        font-size: 0.8rem;
         font-weight: bold;
-        margin-right: 0.5rem;
+        margin-left: 0.5rem;
+        border: 1px solid;
     }
-    .badge-twitter {
-        background-color: #1DA1F2;
-        color: white;
+    .status-new {
+        border-color: #4CAF50;
+        color: #4CAF50;
     }
-    .badge-market {
-        background-color: #FFB6C1;
-        color: white;
-    }
-    .badge-info {
-        background-color: #98D8C8;
-        color: white;
+    .status-restock {
+        border-color: #FF9800;
+        color: #FF9800;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -81,7 +78,7 @@ with st.sidebar:
     # カテゴリ
     category = st.selectbox(
         "カテゴリ",
-        ["すべて", "グッズ", "くじ", "イベント", "漫画", "アニメ", "その他"],
+        ["すべて", "グッズ", "くじ", "イベント", "食玩", "プライズ", "アニメ", "その他"],
         help="カテゴリで絞り込み"
     )
     
@@ -132,47 +129,32 @@ with st.sidebar:
 # データ取得
 # ========================================
 
-@st.cache_data(ttl=300)  # 5分間キャッシュ
+@st.cache_data(ttl=300)
 def get_information(category, sources, period, search, only_images):
     """データベースから情報を取得"""
     query = supabase.table("information").select("*")
     
-    # カテゴリフィルター
     if category != "すべて":
         query = query.eq("category", category)
     
-    # 情報源フィルター
     if sources:
         query = query.in_("source", sources)
     
-    # 期間フィルター
     if period != "すべて":
-        days_map = {
-            "24時間以内": 1,
-            "3日以内": 3,
-            "1週間以内": 7,
-            "1ヶ月以内": 30
-        }
+        days_map = {"24時間以内": 1, "3日以内": 3, "1週間以内": 7, "1ヶ月以内": 30}
         date_from = (datetime.now() - timedelta(days=days_map[period])).isoformat()
         query = query.gte("published_at", date_from)
     
-    # キーワード検索
     if search:
         query = query.or_(f"title.ilike.%{search}%,content.ilike.%{search}%")
-    
-    # データ取得
-    data = query.order("published_at", desc=True).limit(200).execute()
-    
-    results = data.data
-    
-    # 画像フィルター（クライアント側で実施）
+
     if only_images:
-        results = [
-            r for r in results
-            if r.get('images') and json.loads(r['images'])
-        ]
-    
-    return results
+        # 画像が空でない、かつNULLでないものをフィルタリング
+        query = query.not_.is_("images", "null")
+        query = query.not_.eq("images", '[]')
+
+    data = query.order("published_at", desc=True).limit(200).execute()
+    return data.data
 
 # データ取得実行
 try:
@@ -192,24 +174,11 @@ except Exception as e:
 # ========================================
 
 st.subheader("📊 統計情報")
-
 col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric("総件数", len(info_list))
-
-with col2:
-    twitter_count = len([i for i in info_list if i['source'] == 'twitter'])
-    st.metric("🐦 Twitter", twitter_count)
-
-with col3:
-    market_count = len([i for i in info_list if i['source'] == 'chiikawa_market'])
-    st.metric("🎁 マーケット", market_count)
-
-with col4:
-    info_count = len([i for i in info_list if i['source'] == 'chiikawa_info'])
-    st.metric("📰 インフォ", info_count)
-
+col1.metric("総件数", len(info_list))
+col2.metric("🐦 Twitter", len([i for i in info_list if i['source'] == 'twitter']))
+col3.metric("🎁 マーケット", len([i for i in info_list if i['source'] == 'chiikawa_market']))
+col4.metric("📰 インフォ", len([i for i in info_list if i['source'] == 'chiikawa_info']))
 st.divider()
 
 # ========================================
@@ -218,122 +187,68 @@ st.divider()
 
 if not info_list:
     st.info("📭 該当する情報がありません")
-    st.write("フィルターを変更してみてください")
 else:
     st.subheader(f"📰 最新情報 ({len(info_list)}件)")
     
     for idx, item in enumerate(info_list):
         with st.container():
-            # アイコンとコンテンツを横並び
             col_icon, col_content = st.columns([1, 20])
             
             with col_icon:
-                # 情報源別アイコン
-                source_icons = {
-                    "twitter": "🐦",
-                    "chiikawa_market": "🎁",
-                    "chiikawa_info": "📰"
-                }
+                source_icons = {"twitter": "🐦", "chiikawa_market": "🎁", "chiikawa_info": "📰"}
                 st.markdown(f"### {source_icons.get(item['source'], '📌')}")
             
             with col_content:
-                # タイトル
-                st.markdown(f"### {item['title']}")
+                # タイトルとステータスバッジ
+                title_html = f"### {item['title']}"
+                if item['source'] == 'chiikawa_market' and item.get('status'):
+                    status_text = "新商品" if item['status'] == 'new' else "再入荷"
+                    status_class = "status-new" if item['status'] == 'new' else "status-restock"
+                    title_html += f'<span class="status-badge {status_class}">{status_text}</span>'
+                st.markdown(title_html, unsafe_allow_html=True)
                 
-                # メタ情報（日付、カテゴリ、ソース）
+                # メタ情報
                 meta_col1, meta_col2, meta_col3 = st.columns([2, 1, 2])
+                try:
+                    pub_date = item['published_at']
+                    date_str = pub_date.split('T')[0] if isinstance(pub_date, str) else str(pub_date).split(' ')[0]
+                    meta_col1.caption(f"📅 {date_str} 追加")
+                except:
+                    meta_col1.caption("📅 日付不明")
                 
-                with meta_col1:
-                    # 日付
-                    try:
-                        pub_date = item['published_at']
-                        if isinstance(pub_date, str):
-                            date_str = pub_date[:10] if len(pub_date) >= 10 else pub_date
-                        else:
-                            date_str = str(pub_date)[:10]
-                        st.caption(f"📅 {date_str}")
-                    except:
-                        st.caption("📅 日付不明")
+                category_emoji = {"グッズ": "🎁", "くじ": "🎲", "イベント": "🎪", "食玩": "🍬", "プライズ": "🏆", "アニメ": "📺", "その他": "📌"}
+                emoji = category_emoji.get(item['category'], "📌")
+                meta_col2.caption(f"{emoji} {item['category']}")
                 
-                with meta_col2:
-                    # カテゴリ
-                    category_emoji = {
-                        "グッズ": "🎁",
-                        "くじ": "🎲",
-                        "イベント": "🎪",
-                        "漫画": "📖",
-                        "アニメ": "📺",
-                        "その他": "📌"
-                    }
-                    emoji = category_emoji.get(item['category'], "📌")
-                    st.caption(f"{emoji} {item['category']}")
-                
-                with meta_col3:
-                    # 情報源
-                    source_names = {
-                        "twitter": "🐦 Twitter",
-                        "chiikawa_market": "🎁 ちいかわマーケット",
-                        "chiikawa_info": "📰 ちいかわインフォ"
-                    }
-                    st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
-                
-                # 価格表示
+                source_names = {"twitter": "🐦 Twitter", "chiikawa_market": "🎁 ちいかわマーケット", "chiikawa_info": "📰 ちいかわインフォ"}
+                meta_col3.caption(f"📍 {source_names.get(item['source'], item['source'])}")
+
                 if item.get('price'):
                     st.markdown(f"**💰 価格:** {item['price']:,}円")
 
-                # 本文（タイトルと異なる場合のみ）
                 if item.get('content') and item['content'] != item['title']:
-                    content_text = item['content']
-                    # HTMLタグを除去
                     from bs4 import BeautifulSoup
-                    content_text = BeautifulSoup(content_text, 'html.parser').get_text()
-                    
-                    # 長すぎる場合は省略
-                    if len(content_text) > 300:
-                        content_text = content_text[:300] + "..."
-                    
-                    if content_text.strip():
+                    content_text = BeautifulSoup(item['content'], 'html.parser').get_text(strip=True)
+                    if len(content_text) > 200:
+                        content_text = content_text[:200] + "..."
+                    if content_text:
                         st.write(content_text)
                 
-                # 画像表示
                 if item.get('images'):
                     try:
-                        images = json.loads(item['images']) if isinstance(item['images'], str) else item['images']
-                        
-                        if images and len(images) > 0:
+                        images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
+                        if images:
                             st.caption(f"📸 画像 ({len(images)}枚)")
-                            
-                            # 画像を横並びで表示
-                            if len(images) == 1:
-                                st.image(images[0], width=400)
-                            elif len(images) == 2:
-                                img_cols = st.columns(2)
-                                for i, img_url in enumerate(images):
-                                    with img_cols[i]:
-                                        st.image(img_url, use_container_width=True)
-                            else:
-                                # 3枚以上は3列で表示
-                                img_cols = st.columns(3)
-                                for i, img_url in enumerate(images[:6]):  # 最大6枚
-                                    with img_cols[i % 3]:
-                                        st.image(img_url, use_container_width=True)
-                    except Exception as e:
-                        st.caption(f"⚠️ 画像読み込みエラー")
+                            cols = st.columns(min(len(images), 3))
+                            for i, img_url in enumerate(images[:3]):
+                                cols[i].image(img_url, use_container_width=True)
+                    except:
+                        pass
                 
-                # リンクボタン
-                st.link_button(
-                    "🔗 元記事を見る",
-                    item['url'],
-                    use_container_width=False
-                )
+                st.link_button("🔗 元記事を見る", item['url'])
             
-            # 区切り線
             if idx < len(info_list) - 1:
                 st.divider()
-
-# ========================================
-# フッター
-# ========================================
 
 st.divider()
 st.caption("💡 情報は自動収集されます。最新情報は各公式サイトをご確認ください。")

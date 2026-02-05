@@ -66,16 +66,19 @@ def save_to_db(items: List[Dict], source: str) -> int:
             existing = supabase.table("information").select("id").eq("source_id", item['source_id']).execute()
             
             if not existing.data:
+                category = "グッズ" if source == "chiikawa_market" else classify_content(item['title'])
+
                 data = {
                     "source": source,
                     "source_id": item['source_id'],
                     "title": item['title'],
                     "content": item.get('content', item['title']),
                     "url": item['url'],
-                    "images": item.get('images', []), # listのまま渡す（supabase-pyが自動でJSONBに変換）
+                    "images": item.get('images', []),
                     "price": item.get('price'),
-                    "category": classify_content(item['title']),
-                    "published_at": item.get('published_at', datetime.now().isoformat())
+                    "category": category,
+                    "published_at": item.get('published_at', datetime.now().isoformat()),
+                    "status": item.get('status', 'new') 
                 }
                 
                 supabase.table("information").insert(data).execute()
@@ -94,54 +97,83 @@ def save_to_db(items: List[Dict], source: str) -> int:
 
 def collect_twitter() -> List[Dict]:
     print("\n🐦 Twitter収集開始...")
-    nitter_instances = ["https://nitter.poast.org", "https://nitter.privacydev.net"]
-    account = "ngnchiikawa"
+    nitter_instances = [
+        "https://nitter.net", 
+        "https://nitter.it", 
+        "https://nitter.cz",
+        "https://nitter.poast.org", 
+        "https://nitter.privacydev.net"
+    ]
+    account = "chiikawasan"
     
     for instance in nitter_instances:
         try:
             rss_url = f"{instance}/{account}/rss"
-            feed = feedparser.parse(rss_url)
+            print(f"  試行: {rss_url}")
+            # User-Agentを設定してブロックを回避
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            feed_content = requests.get(rss_url, headers=headers, timeout=10).content
+            feed = feedparser.parse(feed_content)
+
             if feed.entries:
                 results = []
                 for entry in feed.entries[:20]:
                     images = []
-                    # summary内の画像タグを抽出
                     if hasattr(entry, 'summary'):
                         soup = BeautifulSoup(entry.summary, 'html.parser')
+                        # /pic/media%2F... のような形式の画像を抽出
+                        for a_tag in soup.find_all('a', href=lambda href: href and '/pic/media' in href):
+                            img_path = a_tag['href']
+                            # URLを再構築
+                            img_url = f"{instance}{img_path}"
+                            images.append(img_url)
+
+                        # 従来のimgタグも一応チェック
                         for img in soup.find_all('img'):
                             src = img.get('src')
                             if src:
                                 if src.startswith('//'): src = f"https:{src}"
-                                images.append(src)
+                                # ドメインがなければ付与
+                                if not src.startswith('http'):
+                                     src = f"{instance}{src}"
+                                if src not in images: # 重複を避ける
+                                    images.append(src)
                     
-                    tweet_id = entry.link.split("/")[-1].split("#")[0]
+                    # NitterのURLをTwitterのURLに変換
+                    tweet_link = entry.link
+                    if "nitter" in tweet_link:
+                         tweet_link = tweet_link.replace(instance, "https://twitter.com")
+
+                    tweet_id = tweet_link.split("/")[-1].split("#")[0]
+                    
                     results.append({
                         'source_id': f"twitter_{tweet_id}",
                         'title': entry.title[:100],
                         'content': entry.get('summary', entry.title),
-                        'url': entry.link.replace(instance, "https://twitter.com"),
+                        'url': tweet_link,
                         'images': images,
-                        'published_at': datetime.now().isoformat() # RSSの日付形式は多様なため簡易化
+                        'published_at': datetime.now().isoformat()
                     })
+                print(f"  ✅ {len(results)}件のツイートを解析")
                 return results
         except Exception as e:
+            print(f"  ❌ インスタンスエラー ({instance}): {e}")
             continue
+    print("  ⚠️ 全てのNitterインスタンスで収集に失敗しました。")
     return []
 
 # ========================================
 # 2. ちいかわマーケット収集（強化版）
 # ========================================
 
-def collect_chiikawa_market() -> List[Dict]:
-    print("\n🎁 ちいかわマーケット収集開始...")
-    url = "https://chiikawamarket.jp/collections/newitems"
+def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
+    print(f"\n🎁 ちいかわマーケット ({status}) 収集開始...")
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # セレクタの改善：商品カードを正確に取得
         items = soup.select('.product-item, .card')
         results = []
         seen_ids = set()
@@ -157,12 +189,10 @@ def collect_chiikawa_market() -> List[Dict]:
             if not product_url.startswith('http'):
                 product_url = f"https://chiikawamarket.jp{product_url}"
 
-            # 重複防止ロジック：URLとタイトルを組み合わせて一意のIDを作る
             source_id = generate_source_id(f"{product_url}_{title}")
             if source_id in seen_ids: continue
             seen_ids.add(source_id)
 
-            # 画像取得の強化 (Lazy Load対応)
             images = []
             img_tag = item.select_one('img')
             if img_tag:
@@ -173,18 +203,15 @@ def collect_chiikawa_market() -> List[Dict]:
                 if img_url:
                     if img_url.startswith('//'): img_url = f"https:{img_url}"
                     elif not img_url.startswith('http'): img_url = f"https://chiikawamarket.jp{img_url}"
-                    images.append(img_url.split('?')[0]) # クエリ削除
+                    images.append(img_url.split('?')[0])
 
-            # 金額取得
             price = None
             price_elem = item.select_one('.price, .price-item')
             if price_elem:
                 price_text = price_elem.get_text(strip=True)
                 try:
-                    # 数値部分（カンマを含む可能性あり）を正規表現で抽出
                     match = re.search(r'(\d{1,3}(,\d{3})*|\d+)', price_text)
                     if match:
-                        # カンマを除去して整数に変換
                         price = int(match.group(1).replace(',', ''))
                     else:
                         price = None
@@ -197,7 +224,8 @@ def collect_chiikawa_market() -> List[Dict]:
                 'url': product_url,
                 'images': images,
                 'price': price,
-                'published_at': datetime.now().isoformat()
+                'published_at': datetime.now().isoformat(),
+                'status': status
             })
             if len(results) >= 50: break
 
@@ -261,21 +289,49 @@ def main():
     print(f"🚀 実行開始: {datetime.now()}")
     total_saved = 0
     
-    # 順次実行
-    for source_name, collector in [
-        ("twitter", collect_twitter),
-        ("chiikawa_market", collect_chiikawa_market),
-        ("chiikawa_info", collect_chiikawa_info)
-    ]:
-        print(f"\n--- {source_name} 収集 ---")
-        items = collector()
-        if items:
-            saved = save_to_db(items, source_name)
-            print(f"  📊 {source_name}: {saved}件を新規保存")
-            total_saved += saved
-        else:
-            print(f"  ⚠️ {source_name} からの新規情報はありませんでした。")
-        time.sleep(1)
+    # Twitter
+    print("\n--- twitter 収集 ---")
+    items = collect_twitter()
+    if items:
+        saved = save_to_db(items, "twitter")
+        print(f"  📊 twitter: {saved}件を新規保存")
+        total_saved += saved
+    else:
+        print(f"  ⚠️ twitter からの新規情報はありませんでした。")
+    time.sleep(1)
+
+    # ちいかわマーケット（新商品）
+    print("\n--- chiikawa_market (new) 収集 ---")
+    market_new_items = collect_chiikawa_market("https://chiikawamarket.jp/collections/newitems", "new")
+    if market_new_items:
+        saved = save_to_db(market_new_items, "chiikawa_market")
+        print(f"  📊 chiikawa_market (new): {saved}件を新規保存")
+        total_saved += saved
+    else:
+        print(f"  ⚠️ chiikawa_market (new) からの新規情報はありませんでした。")
+    time.sleep(1)
+
+    # ちいかわマーケット（再入荷）
+    print("\n--- chiikawa_market (restock) 収集 ---")
+    market_restock_items = collect_chiikawa_market("https://chiikawamarket.jp/collections/restock", "restock")
+    if market_restock_items:
+        saved = save_to_db(market_restock_items, "chiikawa_market")
+        print(f"  📊 chiikawa_market (restock): {saved}件を新規保存")
+        total_saved += saved
+    else:
+        print(f"  ⚠️ chiikawa_market (restock) からの新規情報はありませんでした。")
+    time.sleep(1)
+
+    # ちいかわインフォ
+    print("\n--- chiikawa_info 収集 ---")
+    info_items = collect_chiikawa_info()
+    if info_items:
+        saved = save_to_db(info_items, "chiikawa_info")
+        print(f"  📊 chiikawa_info: {saved}件を新規保存")
+        total_saved += saved
+    else:
+        print(f"  ⚠️ chiikawa_info からの新規情報はありませんでした。")
+    time.sleep(1)
 
     print(f"\n✨ 完了！合計 {total_saved} 件の新規情報を保存しました")
 

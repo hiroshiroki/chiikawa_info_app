@@ -203,39 +203,42 @@ if not info_list:
 else:
     st.subheader(f"📰 最新情報 ({len(info_list)}件)")
     
-    # 3列で表示
-    cols = st.columns(3)
-    
-    for idx, item in enumerate(info_list):
-        with cols[idx % 3]:
-            # 画像表示
-            if item.get('images'):
-                try:
-                    images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
-                    if images:
-                        st.image(images[0], width=150) # 最初の画像のみを固定幅で表示
-                except:
-                    pass
-            
-            # タイトルとステータスバッジ
-            title_html = f"**{item['title']}**"
-            if item['source'] == 'chiikawa_market' and item.get('status'):
-                status_text = "新商品" if item['status'] == 'new' else "再入荷"
-                status_class = "status-new" if item['status'] == 'new' else "status-restock"
-                title_html += f'<span class="status-badge {status_class}">{status_text}</span>'
-            st.markdown(title_html, unsafe_allow_html=True)
-            
-            # メタ情報
-            category_emoji = {"グッズ": "🎁", "くじ": "🎲", "イベント": "🎪", "食玩": "🍬", "プライズ": "🏆", "アニメ": "📺", "その他": "📌"}
-            emoji = category_emoji.get(item['category'], "📌")
-            st.caption(f"{emoji} {item['category']}")
-            
-            source_names = {"twitter": "🐦 Twitter", "chiikawa_market": "🎁 ちいかわマーケット", "chiikawa_info": "📰 ちいかわインフォ"}
-            st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
+    # 3アイテムごとに新しい行を作成
+    for i in range(0, len(info_list), 3):
+        cols = st.columns(3)
+        # 現在の行のアイテムを取得 (最大3つ)
+        row_items = info_list[i:i+3]
+        
+        for j, item in enumerate(row_items):
+            with cols[j]:
+                with st.container(border=True):
+                    # 画像表示
+                    if item.get('images'):
+                        try:
+                            images = item['images'] if isinstance(item['images'], list) else json.loads(item['images'])
+                            if images:
+                                st.image(images[0], use_container_width=True) # コンテナ幅に合わせる
+                        except:
+                            pass
+                    
+                    # タイトルとステータスバッジ
+                    title_html = f"**{item['title']}**"
+                    if item['source'] == 'chiikawa_market' and item.get('status'):
+                        status_text = "新商品" if item['status'] == 'new' else "再入荷"
+                        status_class = "status-new" if item['status'] == 'new' else "status-restock"
+                        title_html += f'<span class="status-badge {status_class}">{status_text}</span>'
+                    st.markdown(title_html, unsafe_allow_html=True)
+                    
+                    # メタ情報
+                    category_emoji = {"グッズ": "🎁", "くじ": "🎲", "イベント": "🎪", "食玩": "🍬", "プライズ": "🏆", "アニメ": "📺", "その他": "📌"}
+                    emoji = category_emoji.get(item['category'], "📌")
+                    st.caption(f"{emoji} {item['category']}")
+                    
+                    source_names = {"twitter": "🐦 Twitter", "chiikawa_market": "🎁 ちいかわマーケット", "chiikawa_info": "📰 ちいかわインフォ"}
+                    st.caption(f"📍 {source_names.get(item['source'], item['source'])}")
 
-            # 価格表示
-            if item.get('price'):
-                st.caption(f"💰 {item['price']:,}円")
-            
-            st.link_button("🔗 詳細を見る", item['url'], use_container_width=True)
-            st.divider() # アイテムごとに区切り線を追加
+                    # 価格表示
+                    if item.get('price'):
+                        st.caption(f"💰 {item['price']:,}円")
+                    
+                    st.link_button("🔗 詳細を見る", item['url'], use_container_width=True)

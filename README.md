@@ -15,6 +15,10 @@
   - 特定日付指定（発売日・再入荷日で絞り込み）
   - キーワード検索
   - 画像ありのみ表示
+- 🔔 **再入荷通知機能**
+  - 同じ商品が異なる日付で再入荷された場合に履歴を記録
+  - Discord Webhookでリアルタイム通知（オプション）
+  - 最近7日間の再入荷をアプリ上で確認可能
 - ⏰ **自動収集**（3時間ごとにGitHub Actionsで実行）
 - 💰 **価格表示対応**
 
@@ -52,6 +56,8 @@ git push -u origin main
 3. Settings > Secrets and variables > Actions で以下を設定：
    - `SUPABASE_URL`: SupabaseのProject URL
    - `SUPABASE_KEY`: Supabaseのanon public key
+   - `DISCORD_WEBHOOK_URL`: Discord Webhook URL（オプション、再入荷通知用）
+   - `DISCORD_SEND_SUMMARY`: `true` または `false`（オプション、収集サマリー通知用）
 
 ### 3. Streamlit Community Cloudにデプロイ
 
@@ -71,7 +77,41 @@ supabase_key = "あなたのSupabase anon public key"
 
 6. 「Deploy!」をクリック
 
-### 4. 初回データ収集
+### 4. Discord通知の設定（オプション）
+
+再入荷を検出した際にDiscordで通知を受け取りたい場合：
+
+#### 4-1. Discord Webhook URLの取得
+
+1. Discordサーバー（または個人チャンネル）を開く
+2. 通知を受け取りたいチャンネルの設定⚙️を開く
+3. 「連携サービス」→「ウェブフック」→「新しいウェブフック」をクリック
+4. 名前を「ちいかわ通知」などに変更（任意）
+5. 「ウェブフックURLをコピー」をクリック
+
+#### 4-2. GitHub Secretsに登録
+
+1. GitHubリポジトリの `Settings` → `Secrets and variables` → `Actions`
+2. 「New repository secret」をクリック
+3. Name: `DISCORD_WEBHOOK_URL`、Secret: コピーしたURL を入力
+4. 「Add secret」をクリック
+
+#### 4-3. サマリー通知を有効化（オプション）
+
+収集完了時に「新規◯件、再入荷◯件」というサマリーも送信したい場合：
+
+1. 上記と同じ手順で新しいSecretを追加
+2. Name: `DISCORD_SEND_SUMMARY`、Secret: `true`
+
+### 5. 再入荷履歴テーブルの作成
+
+SQL Editorで`create_restock_history.sql`を実行：
+
+```sql
+-- create_restock_history.sql の内容をコピペして実行
+```
+
+### 6. 初回データ収集
 
 GitHub Actionsを手動実行：
 1. GitHubリポジトリの「Actions」タブ
@@ -82,15 +122,17 @@ GitHub Actionsを手動実行：
 
 ```
 chiikawa-info-app/
-├── app.py                    # Streamlitアプリ本体
-├── collect.py                # データ収集スクリプト
-├── requirements.txt          # 必要なPythonパッケージ
-├── create_table.sql          # データベーステーブル定義
-├── CLAUDE.md                 # Claude Code設定ファイル
+├── app.py                         # Streamlitアプリ本体
+├── collect.py                     # データ収集スクリプト
+├── notifier.py                    # Discord通知モジュール
+├── requirements.txt               # 必要なPythonパッケージ
+├── create_table.sql               # データベーステーブル定義
+├── create_restock_history.sql     # 再入荷履歴テーブル定義
+├── CLAUDE.md                      # Claude Code設定ファイル
 ├── .github/
 │   └── workflows/
-│       └── collect.yml       # GitHub Actions設定（3時間ごと実行）
-└── README.md                 # このファイル
+│       └── collect.yml            # GitHub Actions設定（3時間ごと実行）
+└── README.md                      # このファイル
 ```
 
 ## 🎯 使い方
@@ -152,6 +194,15 @@ information テーブル:
 - published_at: 収集日時
 - event_date: 発売日・再入荷日（YYYY-MM-DD形式）
 - created_at: データ作成日時
+
+restock_history テーブル:
+- id: シリアルID
+- product_url: 商品URL
+- product_title: 商品タイトル
+- previous_event_date: 以前の発売日・再入荷日
+- new_event_date: 新しい再入荷日
+- detected_at: 検出日時
+- notified: 通知済みフラグ
 ```
 
 ## 🐛 トラブルシューティング

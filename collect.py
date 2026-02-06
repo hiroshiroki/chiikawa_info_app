@@ -15,6 +15,7 @@ try:
     import requests
     from bs4 import BeautifulSoup
     from supabase import create_client, Client
+    from notifier import DiscordNotifier
 except ImportError as e:
     print(f"必要なライブラリがインストールされていません: {e}")
     sys.exit(1)
@@ -329,6 +330,9 @@ def main():
     print(f"🚀 実行開始: {datetime.now(TOKYO_TZ)}")
     total_saved = 0
 
+    # 通知モジュール初期化
+    notifier = DiscordNotifier()
+
     # 日付別コレクションページを取得
     collections = get_latest_market_urls()
 
@@ -357,6 +361,38 @@ def main():
         total_saved += saved
     else:
         print("  ⚠️ chiikawa_marketからの新規情報はありませんでした。")
+
+    # 未通知の再入荷情報を取得して通知
+    print("\n--- 再入荷通知 ---")
+    try:
+        unnotified = supabase.table("restock_history").select("*").eq("notified", False).execute()
+
+        if unnotified.data:
+            print(f"  📬 未通知の再入荷: {len(unnotified.data)}件")
+
+            # Discord通知送信
+            if notifier.send_restock_notification(unnotified.data):
+                print(f"  ✅ Discord通知送信成功")
+
+                # 通知済みフラグを更新
+                for item in unnotified.data:
+                    supabase.table("restock_history").update({"notified": True}).eq("id", item['id']).execute()
+                print(f"  ✅ 通知フラグ更新完了")
+            else:
+                if notifier.enabled:
+                    print(f"  ⚠️ Discord通知送信失敗（通知フラグは更新しません）")
+                else:
+                    print(f"  ℹ️ Discord通知は無効化されています")
+        else:
+            print(f"  ℹ️ 未通知の再入荷はありません")
+
+    except Exception as e:
+        print(f"  ⚠️ 再入荷通知処理エラー: {e}")
+
+    # サマリー通知（オプション）
+    if notifier.enabled and os.getenv("DISCORD_SEND_SUMMARY", "false").lower() == "true":
+        restock_count = len(unnotified.data) if unnotified.data else 0
+        notifier.send_summary(total_saved, restock_count)
 
     print(f"\n✨ 完了！合計 {total_saved} 件の新規情報を保存しました")
 

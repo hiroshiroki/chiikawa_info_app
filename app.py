@@ -154,7 +154,7 @@ def fetch_data(category, period, search, only_images, market_status):
     try:
         query = build_query()
         # event_dateを優先してソート、NULLの場合はpublished_atでソート
-        result = query.order("event_date", desc=True, nullslast=True).order("published_at", desc=True).limit(200).execute()
+        result = query.order("event_date", desc=True, nullsfirst=False).order("published_at", desc=True).limit(200).execute()
         
         total_count = result.count if result.count is not None else 0
         

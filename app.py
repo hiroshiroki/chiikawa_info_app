@@ -87,13 +87,24 @@ with st.sidebar:
         ["すべて", "新商品", "再入荷"],
         help="ちいかわマーケットの商品区分で絞り込み"
     )
-    
+
     # 期間
     period = st.selectbox(
         "期間",
         ["すべて", "24時間以内", "3日以内", "1週間以内", "1ヶ月以内"],
-        help="投稿日で絞り込み"
+        help="発売日・再入荷日で絞り込み"
     )
+
+    # 日付指定
+    st.caption("または特定の日付を指定")
+    use_specific_date = st.checkbox("📅 日付を指定する", value=False)
+    specific_date = None
+    if use_specific_date:
+        specific_date = st.date_input(
+            "日付",
+            value=datetime.now(),
+            help="発売日・再入荷日で絞り込み"
+        )
     
     # 検索
     search_text = st.text_input(
@@ -121,22 +132,27 @@ with st.sidebar:
 # ========================================
 
 @st.cache_data(ttl=300)
-def fetch_data(category, period, search, only_images, market_status):
+def fetch_data(category, period, search, only_images, market_status, specific_date):
     """データベースから情報を取得し、件数とデータリストを返す"""
-    
+
     def build_query():
         query = supabase.table("information").select("*", count='exact')
-        
+
         # ソースはちいかわマーケットのみ
         query = query.eq("source", "chiikawa_market")
 
         if category != "すべて":
             query = query.eq("category", category)
-        
-        if period != "すべて":
+
+        # 日付指定がある場合は優先
+        if specific_date:
+            target_date = specific_date.strftime('%Y-%m-%d')
+            query = query.eq("event_date", target_date)
+        elif period != "すべて":
             days_map = {"24時間以内": 1, "3日以内": 3, "1週間以内": 7, "1ヶ月以内": 30}
-            date_from = (datetime.now() - timedelta(days=days_map[period])).isoformat()
-            query = query.gte("published_at", date_from)
+            date_from = (datetime.now() - timedelta(days=days_map[period])).strftime('%Y-%m-%d')
+            # event_dateまたはpublished_atが期間内のものを取得
+            query = query.or_(f"event_date.gte.{date_from},published_at.gte.{date_from}")
         
         if search:
             query = query.or_(f"title.ilike.%{search}%,content.ilike.%{search}%")
@@ -170,7 +186,8 @@ total_count, info_list = fetch_data(
     period,
     search_text,
     only_with_images,
-    market_status
+    market_status,
+    specific_date if use_specific_date else None
 )
 
 # ========================================

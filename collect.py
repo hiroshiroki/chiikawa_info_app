@@ -229,7 +229,6 @@ def collect_chiikawa_market(url: str, status: str, date_text: Optional[str] = No
                 'status': status,
                 'event_date': event_date_str
             })
-            if len(results) >= 50: break # 収集数の上限
 
         print(f"  ✅ {len(results)}件解析完了")
         return results

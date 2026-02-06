@@ -1,15 +1,22 @@
 # 🐭 ちいかわ情報まとめアプリ
 
-Twitter、ちいかわマーケット、ちいかわインフォから情報を自動収集して表示するWebアプリです。
+ちいかわマーケットから新商品・再入荷情報を自動収集して表示するWebアプリです。
 
 ## 📋 機能
 
-- 🐦 **Twitter公式アカウント**（@ngnchiikawa）から最新ツイートを取得
-- 🎁 **ちいかわマーケット**から新商品情報を取得
-- 📰 **ちいかわインフォ**からイベント情報を取得
-- 📸 **画像表示対応**（ツイート画像、商品画像など）
-- 🔍 **検索・フィルター機能**（カテゴリ、期間、キーワード）
+- 🎁 **ちいかわマーケット**から新商品・再入荷情報を自動収集
+  - 日付別コレクションページに対応
+  - 新商品/再入荷の区分表示
+  - 発売日・再入荷日の自動抽出
+- 📸 **画像表示対応**（商品画像を自動取得）
+- 🔍 **多彩なフィルター機能**
+  - 商品区分（新商品/再入荷）
+  - 期間指定（24時間以内、3日以内、1週間以内、1ヶ月以内）
+  - 特定日付指定（発売日・再入荷日で絞り込み）
+  - キーワード検索
+  - 画像ありのみ表示
 - ⏰ **自動収集**（3時間ごとにGitHub Actionsで実行）
+- 💰 **価格表示対応**
 
 ## 🚀 セットアップ手順
 
@@ -76,12 +83,13 @@ GitHub Actionsを手動実行：
 ```
 chiikawa-info-app/
 ├── app.py                    # Streamlitアプリ本体
-├── collect.py            # データ収集スクリプト
+├── collect.py                # データ収集スクリプト
 ├── requirements.txt          # 必要なPythonパッケージ
 ├── create_table.sql          # データベーステーブル定義
+├── CLAUDE.md                 # Claude Code設定ファイル
 ├── .github/
 │   └── workflows/
-│       └── collect.yml       # GitHub Actions設定
+│       └── collect.yml       # GitHub Actions設定（3時間ごと実行）
 └── README.md                 # このファイル
 ```
 
@@ -127,32 +135,22 @@ supabase_key = "your_key"
 - cron: '0 */6 * * *'
 ```
 
-### カテゴリ判定の調整
-
-`collect.py`の`classify_content`関数を編集：
-
-```python
-def classify_content(text: str) -> str:
-    keywords = {
-        "グッズ": ["グッズ", "発売", "予約", ...],
-        # 新しいカテゴリを追加
-        "新カテゴリ": ["キーワード1", "キーワード2", ...],
-    }
-```
-
 ## 📊 データベーススキーマ
 
 ```sql
 information テーブル:
 - id: シリアルID
-- source: 情報源 (twitter/chiikawa_market/chiikawa_info)
+- source: 情報源（現在は 'chiikawa_market' のみ）
 - source_id: ユニークID（重複チェック用）
-- title: タイトル
-- content: 本文
-- url: 元記事URL
-- images: 画像URL配列（JSON）
-- category: カテゴリ
-- published_at: 投稿日時
+- title: 商品名
+- content: 説明文
+- url: 商品ページURL
+- images: 画像URL配列（JSONB）
+- price: 価格（円）
+- status: 商品区分（'new' or 'restock'）
+- category: カテゴリ（現在は 'グッズ' のみ）
+- published_at: 収集日時
+- event_date: 発売日・再入荷日（YYYY-MM-DD形式）
 - created_at: データ作成日時
 ```
 
@@ -162,12 +160,12 @@ information テーブル:
 
 1. GitHub Actionsのログを確認
 2. Supabaseの接続情報が正しいか確認
-3. Nitterインスタンスが落ちている可能性（collect.py参照）
+3. ちいかわマーケットのサイト構造が変わった可能性
 
 ### 画像が表示されない
 
 - 画像URLが正しいか確認
-- CORSの問題の可能性あり
+- ちいかわマーケット側の画像URLが変更された可能性
 
 ### アプリが起動しない
 
@@ -177,10 +175,9 @@ information テーブル:
 ## 🙏 クレジット
 
 - ちいかわ: ©nagano / chiikawa committee
-- データソース: Twitter、ちいかわマーケット、ちいかわインフォ
+- データソース: [ちいかわマーケット](https://chiikawamarket.jp/)
 
 ## 🔗 リンク
 
 - [ちいかわ公式Twitter](https://twitter.com/ngnchiikawa)
 - [ちいかわマーケット](https://chiikawamarket.jp/)
-- [ちいかわインフォ](https://chiikawa-info.jp/)

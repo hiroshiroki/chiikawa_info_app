@@ -78,52 +78,69 @@ def save_to_db(items: List[Dict], source: str) -> int:
 # ちいかわマーケット収集
 # ========================================
 
-def get_latest_market_urls() -> Dict[str, Optional[str]]:
-    """ちいかわマーケットの最新の新商品・再入荷ページのURLを取得"""
-    print("  🔗 最新のマーケットURLを取得中...")
+def get_latest_market_urls() -> List[Dict[str, str]]:
+    """ちいかわマーケットの日付別コレクションページのURLを取得"""
+    print("  🔗 日付別マーケットURLを取得中...")
     base_url = "https://chiikawamarket.jp"
-    urls = {"new": None, "restock": None}
+    collections = []
+    seen_urls = set()  # 重複チェック用
+
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         response = requests.get(base_url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        link_selectors = [
-            'a[href*="/collections/newitems"]', 
-            'a[href*="/collections/restock"]',
-            'a:contains("新商品")',
-            'a:contains("再入荷")'
-        ]
-        
-        for selector in link_selectors:
-            for link in soup.select(selector):
-                href = link.get('href')
-                if not href: continue
-                
-                full_url = f"{base_url}{href}" if not href.startswith('http') else href
-                
-                if "newitems" in href or "新商品" in link.get_text(strip=True):
-                    urls["new"] = full_url
-                elif "restock" in href or "再入荷" in link.get_text(strip=True):
-                    urls["restock"] = full_url
-        
-        # もし見つからなければフォールバック
-        if not urls["new"]:
-            urls["new"] = "https://chiikawamarket.jp/collections/newitems"
-        if not urls["restock"]:
-            urls["restock"] = "https://chiikawamarket.jp/collections/restock"
 
-        print(f"  👍 取得成功: NEW -> {urls['new']}, RESTOCK -> {urls['restock']}")
-        return urls
+        # すべてのリンクを探索
+        for link in soup.select('a[href*="/collections/"]'):
+            href = link.get('href')
+            text = link.get_text(strip=True)
+
+            if not href:
+                continue
+
+            full_url = f"{base_url}{href}" if not href.startswith('http') else href
+
+            # 重複チェック
+            if full_url in seen_urls:
+                continue
+
+            # 日付を含む新商品リンク (例: "2月6日発売商品" -> /collections/20260206)
+            if '発売商品' in text:
+                date_match = re.search(r'(\d{1,2})月(\d{1,2})日', text)
+                if date_match:
+                    collections.append({
+                        'url': full_url,
+                        'status': 'new',
+                        'date_text': text
+                    })
+                    seen_urls.add(full_url)
+
+            # 日付を含む再入荷リンク (例: "2月5日再入荷商品" -> /collections/re20260205)
+            elif '再入荷商品' in text and '再入荷商品一覧' not in text:
+                date_match = re.search(r'(\d{1,2})月(\d{1,2})日', text)
+                if date_match:
+                    collections.append({
+                        'url': full_url,
+                        'status': 'restock',
+                        'date_text': text
+                    })
+                    seen_urls.add(full_url)
+
+        if collections:
+            print(f"  👍 取得成功: {len(collections)}個の日付別ページを発見")
+            for col in collections:
+                print(f"    - {col['date_text']}: {col['url']}")
+        else:
+            print("  ⚠️ 日付別ページが見つかりませんでした")
+
+        return collections
+
     except Exception as e:
-        print(f"  ❌ 最新マーケットURLの取得に失敗: {e}")
-        return {
-            "new": "https://chiikawamarket.jp/collections/newitems",
-            "restock": "https://chiikawamarket.jp/collections/restock"
-        }
+        print(f"  ❌ マーケットURLの取得に失敗: {e}")
+        return []
 
-def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
+def collect_chiikawa_market(url: str, status: str, date_text: Optional[str] = None) -> List[Dict]:
     if not url:
         print(f"{(f' ({status})')} のURLがありません。スキップします。")
         return []
@@ -133,19 +150,32 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
         response = requests.get(url, headers=headers, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
+        # 日付の抽出 (date_textまたはURLから)
         event_date_str = None
-        date_header = soup.select_one('.collection__title, .section-header__title, h1')
-        if date_header:
-            text = date_header.get_text(strip=True)
-            match = re.search(r'(\d{1,2})月(\d{1,2})日', text)
+
+        # 1. date_textから日付を抽出 (例: "2月6日発売商品")
+        if date_text:
+            match = re.search(r'(\d{1,2})月(\d{1,2})日', date_text)
             if match:
                 month, day = int(match.group(1)), int(match.group(2))
                 now = datetime.now(pytz.timezone('Asia/Tokyo'))
-                year = now.year if now.month >= month else now.year -1
+                year = now.year if month <= now.month + 1 else now.year - 1
                 try:
                     event_date_str = datetime(year, month, day).strftime('%Y-%m-%d')
-                    print(f"  📅 イベント日を抽出: {event_date_str} (from: {text})")
+                    print(f"  📅 イベント日を抽出: {event_date_str} (from: {date_text})")
+                except ValueError:
+                    event_date_str = None
+
+        # 2. URLから日付を抽出 (例: /collections/20260206 または /collections/re20260205)
+        if not event_date_str:
+            url_date_match = re.search(r'/collections/(?:re)?(\d{8})', url)
+            if url_date_match:
+                date_str = url_date_match.group(1)
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y%m%d')
+                    event_date_str = date_obj.strftime('%Y-%m-%d')
+                    print(f"  📅 イベント日を抽出: {event_date_str} (from URL: {url})")
                 except ValueError:
                     event_date_str = None
         
@@ -214,18 +244,24 @@ def collect_chiikawa_market(url: str, status: str) -> List[Dict]:
 def main():
     print(f"🚀 実行開始: {datetime.now(pytz.timezone('Asia/Tokyo'))}")
     total_saved = 0
-    
-    market_urls = get_latest_market_urls()
+
+    # 日付別コレクションページを取得
+    collections = get_latest_market_urls()
+
+    if not collections:
+        print("  ⚠️ 収集するページが見つかりませんでした")
+        return
 
     all_items = []
-    if market_urls.get("new"):
-        print("\n--- chiikawa_market (new) 収集 ---")
-        all_items.extend(collect_chiikawa_market(market_urls["new"], "new"))
-        time.sleep(1)
-
-    if market_urls.get("restock"):
-        print("\n--- chiikawa_market (restock) 収集 ---")
-        all_items.extend(collect_chiikawa_market(market_urls["restock"], "restock"))
+    for collection in collections:
+        status_label = "新商品" if collection['status'] == 'new' else "再入荷"
+        print(f"\n--- chiikawa_market ({status_label}: {collection['date_text']}) 収集 ---")
+        items = collect_chiikawa_market(
+            collection['url'],
+            collection['status'],
+            collection['date_text']
+        )
+        all_items.extend(items)
         time.sleep(1)
 
     if all_items:

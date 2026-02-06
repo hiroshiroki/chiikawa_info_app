@@ -67,6 +67,41 @@ except Exception as e:
 st.markdown('<h1 class="main-title">🐭 ちいかわ情報まとめ</h1>', unsafe_allow_html=True)
 st.caption("ちいかわマーケットから自動収集")
 
+# 再入荷情報を表示
+@st.cache_data(ttl=300)
+def fetch_recent_restocks(days=7):
+    """
+    最近の再入荷情報を取得
+
+    Args:
+        days: 何日前までの再入荷を取得するか
+
+    Returns:
+        再入荷情報のリスト
+    """
+    try:
+        date_from = (datetime.now() - timedelta(days=days)).isoformat()
+        result = supabase.table("restock_history").select("*").gte("detected_at", date_from).order("detected_at", desc=True).limit(10).execute()
+        return result.data
+    except Exception as e:
+        st.error(f"再入荷情報取得エラー: {e}")
+        return []
+
+recent_restocks = fetch_recent_restocks(7)
+
+if recent_restocks:
+    st.info(f"🔔 **最近7日間の再入荷: {len(recent_restocks)}件**")
+    with st.expander("📦 再入荷商品を見る", expanded=False):
+        for restock in recent_restocks:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**{restock['product_title']}**")
+                date_info = f"{restock.get('previous_event_date', '不明')} → **{restock['new_event_date']}**"
+                st.caption(f"📅 {date_info}")
+            with col2:
+                st.link_button("詳細", restock['product_url'], use_container_width=True)
+        st.divider()
+
 # サイドバー：フィルター
 with st.sidebar:
     st.header("🔍 フィルター")

@@ -41,6 +41,40 @@ def generate_source_id(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
 
 
+def check_restock(item: Dict) -> None:
+    """
+    再入荷をチェックして履歴に記録
+
+    Args:
+        item: チェックする商品アイテム
+    """
+    try:
+        # 同じURLの既存商品を検索
+        existing = supabase.table("information").select("*").eq("url", item['url']).execute()
+
+        if existing.data:
+            # 既存商品がある場合
+            existing_item = existing.data[0]
+            existing_event_date = existing_item.get('event_date')
+            new_event_date = item.get('event_date')
+
+            # event_dateが異なる場合、再入荷として記録
+            if new_event_date and existing_event_date != new_event_date:
+                restock_data = {
+                    "product_url": item['url'],
+                    "product_title": item['title'],
+                    "previous_event_date": existing_event_date,
+                    "new_event_date": new_event_date,
+                    "detected_at": datetime.now(TOKYO_TZ).isoformat()
+                }
+
+                supabase.table("restock_history").insert(restock_data).execute()
+                print(f"  🔔 再入荷検出: {item['title'][:30]}... ({existing_event_date} → {new_event_date})")
+
+    except Exception as e:
+        print(f"  ⚠️ 再入荷チェックエラー: {item.get('title', '不明なアイテム')} - {e}")
+
+
 def save_to_db(items: List[Dict], source: str) -> int:
     """
     情報をデータベースに保存
@@ -57,6 +91,9 @@ def save_to_db(items: List[Dict], source: str) -> int:
     # 新しいアイテムが先に来るように逆順で処理
     for item in reversed(items):
         try:
+            # 再入荷チェック（保存前に実行）
+            check_restock(item)
+
             # 重複チェック
             existing = supabase.table("information").select("id").eq("source_id", item['source_id']).execute()
 

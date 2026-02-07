@@ -125,7 +125,8 @@ chiikawa-info-app/
 ├── app.py                         # Streamlitアプリ本体
 ├── collect.py                     # データ収集スクリプト
 ├── notifier.py                    # Discord通知モジュール
-├── requirements.txt               # 必要なPythonパッケージ
+├── requirements.txt               # 必要なPythonパッケージ（アプリ用）
+├── requirements-ci.txt            # CI実行用パッケージ（最小限）
 ├── create_table.sql               # データベーステーブル定義
 ├── create_restock_history.sql     # 再入荷履歴テーブル定義
 ├── CLAUDE.md                      # Claude Code設定ファイル
@@ -176,6 +177,15 @@ supabase_key = "your_key"
 # 6時間ごとに変更する場合
 - cron: '0 */6 * * *'
 ```
+
+### CI実行時間の最適化
+
+GitHub Actionsの実行時間を短縮するため、以下の最適化を実施しています：
+
+- **pipキャッシュ**: 依存関係をキャッシュして再利用（1-2分短縮）
+- **最小限のパッケージ**: CI実行には`requirements-ci.txt`を使用（2-3分短縮）
+  - `streamlit`などアプリ用パッケージは除外
+  - 実行時間: 約2-3分（従来5-6分から短縮）
 
 ## 📊 データベーススキーマ
 

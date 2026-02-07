@@ -1,0 +1,7 @@
+# CI実行用の最小限の依存関係
+# collect.py の実行に必要なパッケージのみ
+supabase>=2.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+pytz

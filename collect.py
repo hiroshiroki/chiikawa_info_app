@@ -56,11 +56,14 @@ def check_restock(item: Dict) -> None:
         if existing.data:
             # 既存商品がある場合
             existing_item = existing.data[0]
-            existing_event_date = existing_item.get('event_date')
-            new_event_date = item.get('event_date')
+            existing_status = existing_item.get('status')
+            new_status = item.get('status')
 
-            # event_dateが異なる場合、再入荷として記録
-            if new_event_date and existing_event_date != new_event_date:
+            # 既存商品が'new'で、新しいステータスが'restock'の場合、再入荷として記録
+            if existing_status == 'new' and new_status == 'restock':
+                existing_event_date = existing_item.get('event_date')
+                new_event_date = item.get('event_date')
+
                 restock_data = {
                     "product_url": item['url'],
                     "product_title": item['title'],
@@ -70,7 +73,11 @@ def check_restock(item: Dict) -> None:
                 }
 
                 supabase.table("restock_history").insert(restock_data).execute()
-                print(f"  🔔 再入荷検出: {item['title'][:30]}... ({existing_event_date} → {new_event_date})")
+                print(f"  🔔 再入荷検出: {item['title'][:30]}... (status: {existing_status} → {new_status})")
+
+                # 既存商品のstatusをrestockに更新
+                supabase.table("information").update({"status": "restock"}).eq("id", existing_item['id']).execute()
+                print(f"  ✅ ステータス更新: {existing_item['id']}")
 
     except Exception as e:
         print(f"  ⚠️ 再入荷チェックエラー: {item.get('title', '不明なアイテム')} - {e}")

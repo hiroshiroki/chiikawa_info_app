@@ -50,34 +50,53 @@ def check_restock(item: Dict) -> None:
         item: チェックする商品アイテム
     """
     try:
+        # status='restock'でない場合は何もしない
+        if item.get('status') != 'restock':
+            return
+
         # 同じURLの既存商品を検索
         existing = supabase.table("information").select("*").eq("url", item['url']).execute()
 
+        # 再入荷履歴データを準備
+        previous_event_date = None
         if existing.data:
-            # 既存商品がある場合
             existing_item = existing.data[0]
-            existing_status = existing_item.get('status')
-            new_status = item.get('status')
+            previous_event_date = existing_item.get('event_date')
 
-            # 既存商品が'new'で、新しいステータスが'restock'の場合、再入荷として記録
-            if existing_status == 'new' and new_status == 'restock':
-                existing_event_date = existing_item.get('event_date')
-                new_event_date = item.get('event_date')
+        new_event_date = item.get('event_date')
 
-                restock_data = {
-                    "product_url": item['url'],
-                    "product_title": item['title'],
-                    "previous_event_date": existing_event_date,
-                    "new_event_date": new_event_date,
-                    "detected_at": datetime.now(TOKYO_TZ).isoformat()
-                }
+        # 同じURLの未通知の再入荷履歴があるかチェック（重複防止）
+        existing_restock = supabase.table("restock_history")\
+            .select("*")\
+            .eq("product_url", item['url'])\
+            .eq("notified", False)\
+            .execute()
 
-                supabase.table("restock_history").insert(restock_data).execute()
-                print(f"  🔔 再入荷検出: {item['title'][:30]}... (status: {existing_status} → {new_status})")
+        if existing_restock.data:
+            # 既に未通知の再入荷履歴がある場合はスキップ
+            print(f"  ℹ️ 既に未通知の再入荷履歴あり: {item['title'][:30]}...")
+            return
 
-                # 既存商品のstatusをrestockに更新
-                supabase.table("information").update({"status": "restock"}).eq("id", existing_item['id']).execute()
-                print(f"  ✅ ステータス更新: {existing_item['id']}")
+        # 再入荷履歴に記録（初回収集でも既存商品があっても記録する）
+        restock_data = {
+            "product_url": item['url'],
+            "product_title": item['title'],
+            "previous_event_date": previous_event_date,
+            "new_event_date": new_event_date,
+            "detected_at": datetime.now(TOKYO_TZ).isoformat()
+        }
+
+        supabase.table("restock_history").insert(restock_data).execute()
+        is_new = not existing.data
+        print(f"  🔔 再入荷検出: {item['title'][:30]}... (初回収集: {is_new})")
+
+        # 既存商品のstatusとevent_dateをrestockに更新
+        if existing.data:
+            supabase.table("information")\
+                .update({"status": "restock", "event_date": new_event_date})\
+                .eq("id", existing.data[0]['id'])\
+                .execute()
+            print(f"  ✅ ステータス更新: {existing.data[0]['id']}")
 
     except Exception as e:
         print(f"  ⚠️ 再入荷チェックエラー: {item.get('title', '不明なアイテム')} - {e}")

@@ -73,11 +73,13 @@ def check_restock(item: Dict) -> None:
             .execute()
 
         if existing_restock.data:
-            # 既に未通知の再入荷履歴がある場合はスキップ
-            print(f"  ℹ️ 既に未通知の再入荷履歴あり: {item['title'][:30]}...")
+            # 既に未通知の再入荷履歴がある場合はスキップ（重複収集防止）
             return
 
         # 再入荷履歴に記録（初回収集でも既存商品があっても記録する）
+        is_new = not existing.data
+        print(f"  🔔 再入荷検出: {item['title'][:30]}... (初回収集: {is_new})")
+
         restock_data = {
             "product_url": item['url'],
             "product_title": item['title'],
@@ -87,8 +89,6 @@ def check_restock(item: Dict) -> None:
         }
 
         supabase.table("restock_history").insert(restock_data).execute()
-        is_new = not existing.data
-        print(f"  🔔 再入荷検出: {item['title'][:30]}... (初回収集: {is_new})")
 
         # 既存商品のstatusとevent_dateをrestockに更新
         if existing.data:
@@ -114,10 +114,17 @@ def save_to_db(items: List[Dict], source: str) -> int:
         保存件数
     """
     saved_count = 0
+    processed_urls = set()  # 処理済みURLを記録
 
     # 新しいアイテムが先に来るように逆順で処理
     for item in reversed(items):
         try:
+            # URLの重複チェック（複数の再入荷ページから同じ商品が収集される場合がある）
+            item_url = item['url']
+            if item_url in processed_urls:
+                continue
+            processed_urls.add(item_url)
+
             # 再入荷チェック（保存前に実行）
             check_restock(item)
 

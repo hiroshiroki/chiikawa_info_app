@@ -65,15 +65,15 @@ def check_restock(item: Dict) -> None:
 
         new_event_date = item.get('event_date')
 
-        # 同じURLの未通知の再入荷履歴があるかチェック（重複防止）
+        # 同じURLと同じevent_dateの再入荷履歴があるかチェック（通知済みも含めて重複防止）
         existing_restock = supabase.table("restock_history")\
             .select("*")\
             .eq("product_url", item['url'])\
-            .eq("notified", False)\
+            .eq("new_event_date", new_event_date)\
             .execute()
 
         if existing_restock.data:
-            # 既に未通知の再入荷履歴がある場合はスキップ（重複収集防止）
+            # 既に同じ日付の再入荷履歴がある場合はスキップ（重複通知防止）
             return
 
         # 再入荷履歴に記録（初回収集でも既存商品があっても記録する）
